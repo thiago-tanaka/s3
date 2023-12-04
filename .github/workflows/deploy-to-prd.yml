@@ -1,0 +1,67 @@
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  run_pull:
+    name: run pull
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: install ssh keys
+        # check this thread to understand why its needed:
+        # https://stackoverflow.com/a/70447517
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} > ~/.ssh/known_hosts
+      - name: connect and pull
+        run: ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && git checkout ${{ secrets.MAIN_BRANCH }} && git pull && exit"
+      - name: cleanup
+        run: rm -rf ~/.ssh
+  deploy:
+    needs: [ run_pull ]
+    name: deploy application and infrastructure
+    env:
+      TERRAFORM_VERSION: 1.3.1
+    strategy:
+      matrix:
+        working-directory: [ ./terraform ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        env:
+          AWS_REGION: ap-northeast-1
+        with:
+          role-to-assume: arn:aws:iam::250824376152:role/terraformRole
+          aws-region: ap-northeast-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ matrix.working-directory }}
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ${{ matrix.working-directory }}
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: terraform plan -out tfplan -var-file dev.tfvars -var commit_sha=$COMMIT_SHA
+
+      - name: Terraform Apply
+        working-directory: ${{ matrix.working-directory }}
+        run: terraform apply -auto-approve tfplan
+

@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  app5:
+    container_name: app5
+    build:
+      context: .
+      target: php
+      args:
+        - APP_ENV=${APP_ENV}
+    environment:
+      - APP_ENV=${APP_ENV}
+    working_dir: /var/www
+    volumes:
+      - ./:/var/www
+    ports:
+      - "8085:8080"
+      - '5178:5178'
+    networks:
+      - mysql-container_mysql_network
+networks:
+    mysql-container_mysql_network:
+        external: true
